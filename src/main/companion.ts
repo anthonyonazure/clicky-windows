@@ -10,6 +10,7 @@ import {
 } from "../services/transcription/interface";
 import { createTTSProvider } from "../services/tts/interface";
 import { UIAService, UIASnapshot } from "../services/uia";
+import { HistoryStore } from "./history";
 
 interface ConversationEntry {
   role: "user" | "assistant";
@@ -48,6 +49,7 @@ export class CompanionManager {
   private conversationHistory: ConversationEntry[] = [];
   private overlayWindows: BrowserWindow[] = [];
   private uia: UIAService;
+  private history: HistoryStore;
 
   constructor(settings: SettingsStore, overlayWindows: BrowserWindow[]) {
     this.settings = settings;
@@ -55,6 +57,11 @@ export class CompanionManager {
     this.transcription = createTranscriptionProvider(settings);
     this.overlayWindows = overlayWindows;
     this.uia = new UIAService();
+    this.history = new HistoryStore();
+  }
+
+  getHistory(): HistoryStore {
+    return this.history;
   }
 
   private getAIProvider(): AIProvider {
@@ -288,6 +295,22 @@ export class CompanionManager {
       } catch (err: unknown) {
         console.warn("TTS provider creation failed:", err instanceof Error ? err.message : err);
       }
+    }
+
+    // 5. Log to history. Non-fatal if disk write fails.
+    try {
+      this.history.append({
+        prompt: transcript,
+        response: response.text,
+        attached: hasAttachment,
+        provider: aiProviderName,
+        window: uiaSnapshot?.windowName,
+      });
+    } catch (err) {
+      console.warn(
+        "[Clicky] history append failed:",
+        err instanceof Error ? err.message : err
+      );
     }
 
     return response.text;

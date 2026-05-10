@@ -70,6 +70,12 @@ contextBridge.exposeInMainWorld("clicky", {
   sendQueryWithImage: (text: string, imageBase64: string): Promise<string> =>
     ipcRenderer.invoke("chat:queryWithImage", text, imageBase64),
 
+  // History — past Q&A search and listing
+  historyRecent: (limit?: number) => ipcRenderer.invoke("history:recent", limit),
+  historySearch: (query: string, limit?: number) =>
+    ipcRenderer.invoke("history:search", query, limit),
+  historyClear: () => ipcRenderer.invoke("history:clear"),
+
   // Audio — send complete recording for transcription + AI query
   sendAudioRecording: (audioData: ArrayBuffer): Promise<{ transcript?: string; response?: string; error?: string }> =>
     ipcRenderer.invoke("audio:recording-complete", audioData),

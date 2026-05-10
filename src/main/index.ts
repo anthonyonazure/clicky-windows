@@ -206,6 +206,18 @@ function setupIPC(): void {
     }
   );
 
+  // History — recent and search over past Q&A pairs. Substring match,
+  // newest first.
+  ipcMain.handle("history:recent", (_event, limit?: number) =>
+    companion.getHistory().recent(typeof limit === "number" ? limit : 20)
+  );
+  ipcMain.handle("history:search", (_event, query: string, limit?: number) =>
+    companion.getHistory().search(String(query || ""), typeof limit === "number" ? limit : 20)
+  );
+  ipcMain.handle("history:clear", () => {
+    companion.getHistory().clear();
+  });
+
   // Settings — getAll returns redacted (sensitive keys masked); revealKey
   // returns plaintext for one sensitive key for edit-time UI flows.
   ipcMain.handle("settings:getAll", () => settings.getRedacted());

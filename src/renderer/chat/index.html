@@ -531,6 +531,110 @@
     }
     #attachment-chip .att-remove:hover { color: var(--text-primary); }
 
+    /* History drawer — slides down from under the titlebar */
+    #history-drawer {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,0.02);
+      backdrop-filter: blur(40px);
+      flex-shrink: 0;
+      max-height: 50vh;
+      overflow: hidden;
+    }
+    #history-drawer[hidden] { display: none; }
+    #history-drawer .row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    #history-search {
+      flex: 1;
+      padding: 7px 10px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+    }
+    #history-search:focus {
+      border-color: var(--border-focus);
+      background: var(--bg-tertiary);
+    }
+    #history-clear {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-tertiary);
+      padding: 6px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    #history-clear:hover {
+      border-color: rgba(248,113,113,0.4);
+      color: #f87171;
+    }
+    #history-results {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      overflow-y: auto;
+      flex: 1;
+      min-height: 60px;
+    }
+    #history-results li {
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      background: var(--bg-secondary);
+      margin-bottom: 6px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    #history-results li:hover { background: var(--bg-tertiary); }
+    #history-results li .hist-prompt {
+      font-size: 12px;
+      color: var(--text-primary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #history-results li .hist-meta {
+      font-size: 10px;
+      color: var(--text-tertiary);
+      margin-top: 2px;
+      display: flex;
+      gap: 8px;
+    }
+    #history-results li.expanded {
+      cursor: default;
+      background: var(--bg-tertiary);
+    }
+    #history-results li.expanded .hist-prompt {
+      white-space: normal;
+      font-weight: 500;
+      margin-bottom: 6px;
+    }
+    #history-results li .hist-response {
+      font-size: 11px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      white-space: pre-wrap;
+      display: none;
+    }
+    #history-results li.expanded .hist-response { display: block; }
+    #history-empty {
+      padding: 16px;
+      text-align: center;
+      color: var(--text-tertiary);
+      font-size: 11px;
+    }
+    #history-empty[hidden] { display: none; }
+
     /* Full-window drop hint shown while dragging an image over the chat */
     #drop-overlay {
       position: fixed;
@@ -885,6 +989,9 @@
     <div class="logo"><svg viewBox="0 0 24 24" fill="none"><defs><linearGradient id="gem" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#638cff"/><stop offset="100%" stop-color="#a78bfa"/></linearGradient></defs><path d="M12 2L22 12L12 22L2 12Z" fill="url(#gem)"/><path d="M12 2L17 7L12 12L7 7Z" fill="rgba(255,255,255,0.25)"/><path d="M12 12L17 7L22 12L17 17Z" fill="rgba(255,255,255,0.1)"/></svg></div>
     <span class="title">Clicky</span>
     <div class="status" id="status-dot"></div>
+    <button class="gear-btn" id="history-btn" title="Search history">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    </button>
     <button class="gear-btn" id="pin-btn" title="Pin on top">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 01-1.11 1.79l-1.78.9A2 2 0 005 15.24V16a1 1 0 001 1h12a1 1 0 001-1v-.76a2 2 0 00-1.11-1.79l-1.78-.9A2 2 0 0115 10.76V7a1 1 0 011-1 1 1 0 001-1V4a1 1 0 00-1-1H8a1 1 0 00-1 1v1a1 1 0 001 1 1 1 0 011 1z"/></svg>
     </button>
@@ -931,6 +1038,16 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
       Report an Issue
     </a>
+  </div>
+
+  <!-- History Drawer -->
+  <div id="history-drawer" hidden>
+    <div class="row">
+      <input type="text" id="history-search" placeholder="Search past questions...">
+      <button id="history-clear" type="button" title="Clear all history">Clear</button>
+    </div>
+    <ul id="history-results"></ul>
+    <div id="history-empty" hidden>No matches.</div>
   </div>
 
   <!-- Setup Panel -->
@@ -1202,6 +1319,109 @@
     // Toggle setup panel
     toggleSetupBtn.addEventListener('click', () => {
       setup.classList.toggle('hidden');
+    });
+
+    // ── History drawer ─────────────────────────────────────────
+    const historyBtn = document.getElementById('history-btn');
+    const historyDrawer = document.getElementById('history-drawer');
+    const historySearch = document.getElementById('history-search');
+    const historyClearBtn = document.getElementById('history-clear');
+    const historyResults = document.getElementById('history-results');
+    const historyEmpty = document.getElementById('history-empty');
+
+    let historySearchTimer = null;
+
+    function relativeTime(ts) {
+      const ms = Date.now() - ts;
+      if (ms < 60_000) return 'just now';
+      if (ms < 3600_000) return Math.round(ms / 60_000) + 'm ago';
+      if (ms < 86400_000) return Math.round(ms / 3600_000) + 'h ago';
+      const days = Math.round(ms / 86400_000);
+      if (days < 30) return days + 'd ago';
+      return new Date(ts).toLocaleDateString();
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      })[c]);
+    }
+
+    function renderHistory(entries) {
+      historyResults.innerHTML = '';
+      if (!entries || entries.length === 0) {
+        historyEmpty.hidden = false;
+        return;
+      }
+      historyEmpty.hidden = true;
+      for (const e of entries) {
+        const li = document.createElement('li');
+        const respClean = String(e.r || '')
+          .replace(/\[POINT:[^\]]+\]/g, '')
+          .replace(/\[ELEMENT:\d+\]/g, '')
+          .trim();
+        const meta = [
+          relativeTime(e.t),
+          e.attached ? 'image' : null,
+          e.window ? e.window : null,
+        ].filter(Boolean).join(' · ');
+        li.innerHTML = `
+          <div class="hist-prompt">${escapeHtml(e.p)}</div>
+          <div class="hist-meta">${escapeHtml(meta)}</div>
+          <div class="hist-response">${escapeHtml(respClean) || '(no response)'}</div>
+        `;
+        li.addEventListener('click', () => {
+          li.classList.toggle('expanded');
+        });
+        historyResults.appendChild(li);
+      }
+    }
+
+    async function loadRecent() {
+      try {
+        const entries = await window.clicky.historyRecent(50);
+        renderHistory(entries);
+      } catch (err) {
+        console.warn('historyRecent failed:', err);
+        renderHistory([]);
+      }
+    }
+
+    async function runHistorySearch(query) {
+      try {
+        const entries = query
+          ? await window.clicky.historySearch(query, 50)
+          : await window.clicky.historyRecent(50);
+        renderHistory(entries);
+      } catch (err) {
+        console.warn('historySearch failed:', err);
+        renderHistory([]);
+      }
+    }
+
+    historyBtn.addEventListener('click', () => {
+      historyDrawer.hidden = !historyDrawer.hidden;
+      if (!historyDrawer.hidden) {
+        historySearch.value = '';
+        loadRecent();
+        historySearch.focus();
+      }
+    });
+
+    historySearch.addEventListener('input', () => {
+      clearTimeout(historySearchTimer);
+      const q = historySearch.value;
+      historySearchTimer = setTimeout(() => runHistorySearch(q), 150);
+    });
+
+    historyClearBtn.addEventListener('click', async () => {
+      if (!confirm('Clear all conversation history? This cannot be undone.')) return;
+      try {
+        await window.clicky.historyClear();
+        renderHistory([]);
+      } catch (err) {
+        console.warn('historyClear failed:', err);
+      }
     });
 
     // Wire Show/Hide buttons on each stored-key hint.
