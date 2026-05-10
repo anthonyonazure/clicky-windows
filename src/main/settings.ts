@@ -41,6 +41,12 @@ interface SettingsSchema {
 
   // HIPAA
   hipaaMode: boolean;
+
+  // UI Automation hybrid pointing (Phase 1 prototype). When on, every
+  // query snapshots the foreground window's accessibility tree and feeds
+  // an element list to the model so it can emit [ELEMENT:id] tags that
+  // skip the pass-2 refinement call.
+  uiaEnabled: boolean;
 }
 
 const defaults: SettingsSchema = {
@@ -64,6 +70,7 @@ const defaults: SettingsSchema = {
   openaiModel: "gpt-4o",
   openrouterModel: "anthropic/claude-sonnet-4-5",
   hipaaMode: false,
+  uiaEnabled: false,
 };
 
 const SENSITIVE_KEYS: ReadonlySet<keyof SettingsSchema> = new Set<keyof SettingsSchema>([

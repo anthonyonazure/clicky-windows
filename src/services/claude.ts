@@ -6,6 +6,12 @@ interface ClaudeQueryParams {
   screenshots: ScreenshotResult[];
   cursorPosition: { x: number; y: number };
   conversationHistory: Array<{ role: "user" | "assistant"; content: string }>;
+  /**
+   * Optional pre-rendered list of UIA elements in the foreground window.
+   * When provided, the system prompt gains an ELEMENT tag protocol and
+   * the model is told to prefer those tags over POINT for listed items.
+   */
+  uiaContext?: string;
 }
 
 interface ClaudeResponse {
@@ -95,6 +101,45 @@ Counter-example (WRONG — forgot the tag):
 Correct version:
 > "Clique sur le bouton pause [POINT:512,892:Bouton Pause:screen1] en bas de l'écran !"`;
 
+const ELEMENT_PROTOCOL = `
+
+## ELEMENT tags — the precise, OS-supplied pointing mode
+
+When the user message contains a "UI elements in the foreground window" list, you have a **second, more accurate** pointing option. Each entry looks like:
+
+  [12] Save (button)
+
+\`12\` is the element id, \`Save\` is the element's accessible name, \`button\` is its role.
+
+To point at one of these elements, emit a tag of this form INSTEAD of a POINT tag:
+
+  [ELEMENT:12]
+
+No coordinates, no label, no screen index. The renderer resolves the id back to exact pixel bounds using the operating system's accessibility data, which is more accurate than your visual estimate.
+
+### When to use ELEMENT vs POINT
+
+- **Prefer ELEMENT** when the thing you want to point at is in the list (matched by name + role).
+- Use **POINT** for items that are NOT in the list — e.g. content inside a canvas (Photoshop drawing area, video frame), parts of a webpage's body the browser didn't expose, custom-drawn UI.
+- It's fine to mix ELEMENT and POINT tags in the same reply.
+
+### Examples (with element list provided)
+
+List:
+  [1] File (menu item)
+  [2] Edit (menu item)
+  [3] Bold (Ctrl+B) (button)
+  [4] Save (button)
+
+User: "How do I make this bold?"
+You: "Click here [ELEMENT:3] to bold the selection."
+
+User: "Save the file"
+You: "Hit [ELEMENT:4] or press Ctrl+S."
+
+User: "Click somewhere in the middle of the canvas"
+You: "Right around here [POINT:780,500:Canvas center:screen0]."  (Canvas content isn't in the element list, so POINT is correct.)`;
+
 export class ClaudeService {
   private settings: SettingsStore;
 
@@ -128,17 +173,18 @@ export class ClaudeService {
     }
 
     // Add screen context
-    userContent.push({
-      type: "text",
-      text: [
-        `User says: "${params.transcript}"`,
-        `Cursor position: (${params.cursorPosition.x}, ${params.cursorPosition.y})`,
-        `Screens (give POINT coordinates in IMAGE pixels — use the image dimensions below, NOT the actual screen resolution):`,
-        ...params.screenshots.map((s, i) =>
-          `  screen${i}: image is ${s.imageDimensions.width}x${s.imageDimensions.height} px (actual display ${s.bounds.width}x${s.bounds.height} at ${s.bounds.x},${s.bounds.y})`
-        ),
-      ].join("\n"),
-    });
+    const contextLines = [
+      `User says: "${params.transcript}"`,
+      `Cursor position: (${params.cursorPosition.x}, ${params.cursorPosition.y})`,
+      `Screens (give POINT coordinates in IMAGE pixels — use the image dimensions below, NOT the actual screen resolution):`,
+      ...params.screenshots.map((s, i) =>
+        `  screen${i}: image is ${s.imageDimensions.width}x${s.imageDimensions.height} px (actual display ${s.bounds.width}x${s.bounds.height} at ${s.bounds.x},${s.bounds.y})`
+      ),
+    ];
+    if (params.uiaContext) {
+      contextLines.push("", params.uiaContext);
+    }
+    userContent.push({ type: "text", text: contextLines.join("\n") });
 
     // Build messages array from conversation history
     const messages = params.conversationHistory.map((entry) => ({
@@ -158,7 +204,7 @@ export class ClaudeService {
       body: JSON.stringify({
         model,
         max_tokens: 1024,
-        system: SYSTEM_PROMPT,
+        system: params.uiaContext ? SYSTEM_PROMPT + ELEMENT_PROTOCOL : SYSTEM_PROMPT,
         messages,
       }),
     });

@@ -1,4 +1,4 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, screen } from "electron";
 import { ScreenCapture, ScreenshotResult, cropScreenshotRegion } from "./screenshot";
 import { SettingsStore } from "./settings";
 import { ClaudeService } from "../services/claude";
@@ -9,6 +9,7 @@ import {
   createTranscriptionProvider,
 } from "../services/transcription/interface";
 import { createTTSProvider } from "../services/tts/interface";
+import { UIAService, UIASnapshot } from "../services/uia";
 
 interface ConversationEntry {
   role: "user" | "assistant";
@@ -21,7 +22,16 @@ interface AIProvider {
     screenshots: ScreenshotResult[];
     cursorPosition: { x: number; y: number };
     conversationHistory: ConversationEntry[];
+    uiaContext?: string;
   }): Promise<{ text: string }>;
+}
+
+interface ResolvedTag {
+  x: number;          // display-local CSS pixels (overlay-window space)
+  y: number;
+  label: string;
+  screen: number;     // overlay window index = screen.getAllDisplays() index
+  source: "element" | "point";
 }
 
 const MAX_CONVERSATION_HISTORY = 10;
@@ -37,12 +47,14 @@ export class CompanionManager {
   private transcription: TranscriptionProvider;
   private conversationHistory: ConversationEntry[] = [];
   private overlayWindows: BrowserWindow[] = [];
+  private uia: UIAService;
 
   constructor(settings: SettingsStore, overlayWindows: BrowserWindow[]) {
     this.settings = settings;
     this.screenCapture = new ScreenCapture();
     this.transcription = createTranscriptionProvider(settings);
     this.overlayWindows = overlayWindows;
+    this.uia = new UIAService();
   }
 
   private getAIProvider(): AIProvider {
@@ -74,6 +86,28 @@ export class CompanionManager {
     const screenshots = await this.screenCapture.captureAllScreens();
     const cursorPos = this.screenCapture.getCursorPosition();
 
+    // 1b. Optionally snapshot the foreground window's UIA tree. The walk
+    //     can stall on dense apps, so cap at 1500ms and treat any failure
+    //     as "no UIA hint" — the POINT pipeline still works.
+    let uiaSnapshot: UIASnapshot | null = null;
+    if (this.settings.get("uiaEnabled")) {
+      this.broadcastStage("uia", "Scanning UI...");
+      const t0 = Date.now();
+      try {
+        uiaSnapshot = await this.uia.snapshot({ timeoutMs: 1500 });
+        if (uiaSnapshot) {
+          console.log(
+            `[Clicky] UIA snapshot: ${uiaSnapshot.elements.length} elements from "${uiaSnapshot.windowName}" in ${Date.now() - t0}ms`
+          );
+        } else {
+          console.log("[Clicky] UIA snapshot: unavailable");
+        }
+      } catch (err) {
+        console.warn("[Clicky] UIA snapshot threw:", err instanceof Error ? err.message : err);
+      }
+    }
+    const uiaContext = uiaSnapshot ? this.uia.toPromptList(uiaSnapshot) : undefined;
+
     // 2. Send to AI provider with conversation history
     this.conversationHistory.push({ role: "user", content: transcript });
 
@@ -84,6 +118,7 @@ export class CompanionManager {
       screenshots,
       cursorPosition: cursorPos,
       conversationHistory: this.conversationHistory,
+      uiaContext,
     });
 
     this.conversationHistory.push({ role: "assistant", content: response.text });
@@ -97,6 +132,31 @@ export class CompanionManager {
     const rawTags = this.parseRawPointTags(response.text);
     console.log("[Clicky] Claude response:", response.text);
     console.log("[Clicky] Raw POINT tags:", JSON.stringify(rawTags));
+
+    // 3a'. Parse ELEMENT tags and resolve each via the UIA snapshot.
+    //      Element-resolved tags skip the refinement pass — UIA already
+    //      gives precise OS-supplied bounds.
+    const elementResolved: ResolvedTag[] = [];
+    if (uiaSnapshot) {
+      const elementIds = this.parseElementTags(response.text);
+      console.log("[Clicky] ELEMENT tag ids:", JSON.stringify(elementIds));
+      for (const id of elementIds) {
+        const el = this.uia.resolve(uiaSnapshot, id);
+        if (!el) {
+          console.warn(`[Clicky] ELEMENT:${id} not found in snapshot`);
+          continue;
+        }
+        const local = this.absoluteToLocal(el.x, el.y);
+        if (!local) continue;
+        elementResolved.push({
+          x: local.x,
+          y: local.y,
+          label: el.name,
+          screen: local.screen,
+          source: "element",
+        });
+      }
+    }
 
     // 3b. Second-pass refinement: only Claude for now.
     //     For each tag, crop ~400px around the estimated point and ask the
@@ -146,24 +206,30 @@ export class CompanionManager {
     }
 
     // 3c. Scale image-pixel coords to display-pixel coords for the overlay.
-    const pointTags = refinedTags.map((tag) => {
+    const pointResolved: ResolvedTag[] = refinedTags.map((tag) => {
       const shot = screenshots[tag.screen] || screenshots[0];
-      if (!shot) return tag;
+      if (!shot) {
+        return { x: tag.x, y: tag.y, label: tag.label, screen: tag.screen, source: "point" };
+      }
       const scaleX = shot.bounds.width / shot.imageDimensions.width;
       const scaleY = shot.bounds.height / shot.imageDimensions.height;
       return {
-        ...tag,
         x: Math.round(tag.x * scaleX),
         y: Math.round(tag.y * scaleY),
+        label: tag.label,
+        screen: tag.screen,
+        source: "point",
       };
     });
-    console.log("[Clicky] Final POINT tags:", JSON.stringify(pointTags));
+
+    // 3d. Merge ELEMENT-resolved and POINT-resolved tags. Both arrays now
+    //     hold display-local CSS pixel coordinates, ready for the overlay.
+    const allTags: ResolvedTag[] = [...elementResolved, ...pointResolved];
+    console.log("[Clicky] Final tags:", JSON.stringify(allTags));
     console.log("[Clicky] Overlay windows:", this.overlayWindows.length);
-    if (pointTags.length > 0 && this.overlayWindows.length > 0) {
-      // Route each tag to the overlay for its target display. Coordinates
-      // are already in that display's local CSS space (0..bounds.width).
-      const byScreen = new Map<number, typeof pointTags>();
-      for (const tag of pointTags) {
+    if (allTags.length > 0 && this.overlayWindows.length > 0) {
+      const byScreen = new Map<number, ResolvedTag[]>();
+      for (const tag of allTags) {
         const list = byScreen.get(tag.screen) || [];
         list.push(tag);
         byScreen.set(tag.screen, list);
@@ -171,7 +237,7 @@ export class CompanionManager {
       for (const [screenIdx, tags] of byScreen) {
         if (screenIdx < 0 || screenIdx >= this.overlayWindows.length) {
           console.warn(
-            `[Clicky] POINT tag screen=${screenIdx} is out of range (have ${this.overlayWindows.length} overlay windows); routing to primary display.`
+            `[Clicky] Tag screen=${screenIdx} is out of range (have ${this.overlayWindows.length} overlay windows); routing to primary display.`
           );
         }
         const win = this.overlayWindows[screenIdx] || this.overlayWindows[0];
@@ -181,9 +247,12 @@ export class CompanionManager {
       }
     }
 
-    // 4. Speak response (strip POINT tags from spoken text) — non-blocking
-    //    Re-read settings each time so chat toggle changes take effect immediately
-    const spokenText = response.text.replace(/\[POINT:[^\]]+\]/g, "").trim();
+    // 4. Speak response (strip POINT and ELEMENT tags) — non-blocking.
+    //    Re-read settings each time so chat toggle changes take effect immediately.
+    const spokenText = response.text
+      .replace(/\[POINT:[^\]]+\]/g, "")
+      .replace(/\[ELEMENT:\d+\]/g, "")
+      .trim();
     const ttsOn = this.settings.get("ttsEnabled");
     const ttsProv = this.settings.get("ttsProvider");
     if (ttsOn && spokenText) {
@@ -221,6 +290,40 @@ export class CompanionManager {
     }
 
     return tags;
+  }
+
+  private parseElementTags(text: string): number[] {
+    const regex = /\[ELEMENT:(\d+)\]/g;
+    const ids: number[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(text)) !== null) {
+      ids.push(parseInt(match[1], 10));
+    }
+    return ids;
+  }
+
+  /**
+   * Convert display-absolute (virtual-desktop) pixel coords into
+   * display-local CSS pixel coords + the matching overlay window index.
+   * Returns null if no display contains the point (shouldn't happen in
+   * practice but guard against unhooked monitors).
+   */
+  private absoluteToLocal(
+    absX: number,
+    absY: number
+  ): { x: number; y: number; screen: number } | null {
+    const displays = screen.getAllDisplays();
+    for (let i = 0; i < displays.length; i++) {
+      const b = displays[i].bounds;
+      if (absX >= b.x && absX < b.x + b.width && absY >= b.y && absY < b.y + b.height) {
+        return { x: absX - b.x, y: absY - b.y, screen: i };
+      }
+    }
+    const nearest = screen.getDisplayNearestPoint({ x: absX, y: absY });
+    const idx = displays.findIndex((d) => d.id === nearest.id);
+    if (idx < 0) return null;
+    const b = nearest.bounds;
+    return { x: absX - b.x, y: absY - b.y, screen: idx };
   }
 
   clearHistory(): void {
