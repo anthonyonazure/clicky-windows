@@ -382,6 +382,25 @@
     </label>
   </div>
 
+  <div class="section-label">Integrations</div>
+
+  <div class="toggle-row">
+    <label>Save every Q&amp;A to Cortex</label>
+    <label class="toggle">
+      <input type="checkbox" id="cortexEnabled">
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="field">
+    <label>Cortex server URL</label>
+    <input type="text" id="cortexUrl" placeholder="http://localhost:5201">
+    <div class="key-hint" id="cortex-ping" hidden>
+      <span id="cortex-ping-text">Not checked.</span>
+      <button type="button" id="cortex-test">Test</button>
+    </div>
+  </div>
+
   <div class="section-label">Experimental</div>
 
   <div class="toggle-row">
@@ -419,7 +438,8 @@
       'anthropicApiKey', 'openaiApiKey', 'openrouterApiKey', 'assemblyaiApiKey', 'elevenlabsApiKey',
       'proxyUrl', 'useProxy', 'pushToTalkHotkey', 'transcriptionProvider',
       'aiProvider', 'claudeModel', 'openaiModel', 'openrouterModel',
-      'alwaysOnTop', 'cursorBuddyEnabled', 'hipaaMode', 'uiaEnabled'
+      'alwaysOnTop', 'cursorBuddyEnabled', 'hipaaMode', 'uiaEnabled',
+      'cortexEnabled', 'cortexUrl'
     ];
 
     // Latest mask returned by the main process (e.g. "••••4f2a") — used to
@@ -454,6 +474,8 @@
 
       updateProviderUI();
       updateStatus(settings);
+      // Surface the cortex ping row only when the toggle is on.
+      if (typeof updateCortexPingVisibility === 'function') updateCortexPingVisibility();
     });
 
     function updateKeyHint(key, mask) {
@@ -513,6 +535,38 @@
 
     document.getElementById('aiProvider').addEventListener('change', updateProviderUI);
     updateProviderUI();
+
+    // Cortex test ping — surfaces a quick reachability status next to the URL.
+    const cortexEnabledEl = document.getElementById('cortexEnabled');
+    const cortexUrlEl = document.getElementById('cortexUrl');
+    const cortexPing = document.getElementById('cortex-ping');
+    const cortexPingText = document.getElementById('cortex-ping-text');
+    const cortexTestBtn = document.getElementById('cortex-test');
+
+    function updateCortexPingVisibility() {
+      cortexPing.hidden = !cortexEnabledEl.checked;
+    }
+    cortexEnabledEl.addEventListener('change', updateCortexPingVisibility);
+
+    cortexTestBtn?.addEventListener('click', async () => {
+      const url = (cortexUrlEl.value || '').trim().replace(/\/+$/, '');
+      if (!url) {
+        cortexPingText.textContent = 'Set a URL first.';
+        return;
+      }
+      cortexPingText.textContent = 'Checking...';
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 2000);
+        const res = await fetch(url + '/api/memos?limit=1', { signal: ctrl.signal });
+        clearTimeout(t);
+        cortexPingText.textContent = res.ok || res.status === 404
+          ? 'Cortex is reachable.'
+          : 'HTTP ' + res.status;
+      } catch (err) {
+        cortexPingText.textContent = 'Unreachable: ' + (err.message || err);
+      }
+    });
 
     document.getElementById('hipaaMode').addEventListener('change', (e) => {
       if (e.target.checked) {

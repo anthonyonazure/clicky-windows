@@ -11,6 +11,11 @@ import {
 import { createTTSProvider } from "../services/tts/interface";
 import { UIAService, UIASnapshot } from "../services/uia";
 import { HistoryStore } from "./history";
+import {
+  CortexClient,
+  formatMemoBody,
+  buildMemoTags,
+} from "../services/cortex";
 
 interface ConversationEntry {
   role: "user" | "assistant";
@@ -311,6 +316,32 @@ export class CompanionManager {
         "[Clicky] history append failed:",
         err instanceof Error ? err.message : err
       );
+    }
+
+    // 6. Push to Cortex if enabled. Fire-and-forget — never block the
+    //    response on Cortex availability.
+    if (this.settings.get("cortexEnabled")) {
+      const cortexUrl = this.settings.get("cortexUrl") || "http://localhost:5201";
+      const client = new CortexClient(cortexUrl);
+      const body = formatMemoBody({
+        prompt: transcript,
+        response: response.text,
+        attached: hasAttachment,
+        window: uiaSnapshot?.windowName,
+        provider: aiProviderName,
+      });
+      const tags = buildMemoTags({
+        attached: hasAttachment,
+        window: uiaSnapshot?.windowName,
+        provider: aiProviderName,
+      });
+      client.pushMemo({ content: body, tags }).then((r) => {
+        if (!r.ok) {
+          console.warn("[Clicky] cortex push failed:", r.error);
+        } else {
+          console.log("[Clicky] cortex memo created:", r.memoId);
+        }
+      });
     }
 
     return response.text;

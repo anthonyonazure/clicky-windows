@@ -47,6 +47,12 @@ interface SettingsSchema {
   // an element list to the model so it can emit [ELEMENT:id] tags that
   // skip the pass-2 refinement call.
   uiaEnabled: boolean;
+
+  // Cortex integration. When on, each Clicky Q&A pair is pushed to a
+  // running Cortex server as a memo so the knowledge accumulates in
+  // Anthony's personal knowledge OS instead of just history.ndjson.
+  cortexEnabled: boolean;
+  cortexUrl: string;
 }
 
 const defaults: SettingsSchema = {
@@ -71,6 +77,8 @@ const defaults: SettingsSchema = {
   openrouterModel: "anthropic/claude-sonnet-4-5",
   hipaaMode: false,
   uiaEnabled: false,
+  cortexEnabled: false,
+  cortexUrl: "http://localhost:5201",
 };
 
 const SENSITIVE_KEYS: ReadonlySet<keyof SettingsSchema> = new Set<keyof SettingsSchema>([
