@@ -1,4 +1,4 @@
-import { BrowserWindow, screen } from "electron";
+import { BrowserWindow, nativeImage, screen } from "electron";
 import { ScreenCapture, ScreenshotResult, cropScreenshotRegion } from "./screenshot";
 import { SettingsStore } from "./settings";
 import { ClaudeService } from "../services/claude";
@@ -77,20 +77,39 @@ export class CompanionManager {
   }
 
   /**
-   * Process a user query: capture screen, send to AI, speak response.
+   * Process a user query: capture screen (or use an attached image), send
+   * to AI, speak response.
+   *
+   * If `attachedImage` is provided, we skip the screen capture entirely
+   * and answer about that image instead. POINT/ELEMENT tags from the
+   * model still get parsed but are not routed to the cursor overlay —
+   * they'd land on random spots of the real screen, which would be wrong.
    */
-  async processQuery(transcript: string): Promise<string> {
+  async processQuery(
+    transcript: string,
+    attachedImage?: { data: string; mime?: string }
+  ): Promise<string> {
     try {
-    // 1. Capture screenshots
-    this.broadcastStage("capturing", "Reading screen...");
-    const screenshots = await this.screenCapture.captureAllScreens();
+    const hasAttachment = !!attachedImage;
+
+    // 1. Capture screenshots (skipped when an attachment is provided).
+    let screenshots: ScreenshotResult[];
+    if (hasAttachment) {
+      this.broadcastStage("capturing", "Loading image...");
+      const synthetic = this.buildAttachmentScreenshot(attachedImage!.data);
+      screenshots = synthetic ? [synthetic] : [];
+    } else {
+      this.broadcastStage("capturing", "Reading screen...");
+      screenshots = await this.screenCapture.captureAllScreens();
+    }
     const cursorPos = this.screenCapture.getCursorPosition();
 
     // 1b. Optionally snapshot the foreground window's UIA tree. The walk
     //     can stall on dense apps, so cap at 1500ms and treat any failure
-    //     as "no UIA hint" — the POINT pipeline still works.
+    //     as "no UIA hint" — the POINT pipeline still works. Skipped for
+    //     attached-image queries (no screen to point at).
     let uiaSnapshot: UIASnapshot | null = null;
-    if (this.settings.get("uiaEnabled")) {
+    if (this.settings.get("uiaEnabled") && !hasAttachment) {
       this.broadcastStage("uia", "Scanning UI...");
       const t0 = Date.now();
       try {
@@ -164,7 +183,7 @@ export class CompanionManager {
     //     tag if anything goes wrong.
     const aiProviderName = this.settings.get("aiProvider");
     let refinedTags = rawTags;
-    if (aiProviderName === "anthropic" && rawTags.length > 0) {
+    if (aiProviderName === "anthropic" && rawTags.length > 0 && !hasAttachment) {
       this.broadcastStage("refining", "Refining points...");
       const claude = new ClaudeService(this.settings);
       refinedTags = await Promise.all(
@@ -224,7 +243,11 @@ export class CompanionManager {
 
     // 3d. Merge ELEMENT-resolved and POINT-resolved tags. Both arrays now
     //     hold display-local CSS pixel coordinates, ready for the overlay.
-    const allTags: ResolvedTag[] = [...elementResolved, ...pointResolved];
+    //     Attached-image queries skip overlay routing — there's no live UI
+    //     to point at.
+    const allTags: ResolvedTag[] = hasAttachment
+      ? []
+      : [...elementResolved, ...pointResolved];
     console.log("[Clicky] Final tags:", JSON.stringify(allTags));
     console.log("[Clicky] Overlay windows:", this.overlayWindows.length);
     if (allTags.length > 0 && this.overlayWindows.length > 0) {
@@ -290,6 +313,52 @@ export class CompanionManager {
     }
 
     return tags;
+  }
+
+  /**
+   * Re-encode a user-supplied image (PNG, JPEG, anything Electron's
+   * NativeImage can parse) into a ScreenshotResult that flows through the
+   * existing AI-query path. JPEG output keeps claude.ts's hardcoded
+   * media_type happy. Bounds + imageDimensions are set to the JPEG size
+   * so any (unused) coordinate math is at 1:1.
+   */
+  private buildAttachmentScreenshot(base64: string): ScreenshotResult | null {
+    try {
+      const buf = Buffer.from(base64, "base64");
+      const img = nativeImage.createFromBuffer(buf);
+      if (img.isEmpty()) return null;
+
+      const size = img.getSize();
+      const MAX = 1568;
+      const maxEdge = Math.max(size.width, size.height);
+      const scaled =
+        maxEdge > MAX
+          ? img.resize({
+              width: Math.round((size.width * MAX) / maxEdge),
+              height: Math.round((size.height * MAX) / maxEdge),
+            })
+          : img;
+      const scaledSize = scaled.getSize();
+      const jpeg = scaled.toJPEG(85);
+
+      return {
+        data: jpeg.toString("base64"),
+        displayIndex: 0,
+        bounds: {
+          x: 0,
+          y: 0,
+          width: scaledSize.width,
+          height: scaledSize.height,
+        },
+        imageDimensions: { width: scaledSize.width, height: scaledSize.height },
+      };
+    } catch (err) {
+      console.warn(
+        "[Clicky] Failed to decode attached image:",
+        err instanceof Error ? err.message : err
+      );
+      return null;
+    }
   }
 
   private parseElementTags(text: string): number[] {

@@ -66,6 +66,10 @@ contextBridge.exposeInMainWorld("clicky", {
   sendQuery: (text: string): Promise<string> =>
     ipcRenderer.invoke("chat:query", text),
 
+  // Chat — send a query with a pasted/dropped image instead of screen capture
+  sendQueryWithImage: (text: string, imageBase64: string): Promise<string> =>
+    ipcRenderer.invoke("chat:queryWithImage", text, imageBase64),
+
   // Audio — send complete recording for transcription + AI query
   sendAudioRecording: (audioData: ArrayBuffer): Promise<{ transcript?: string; response?: string; error?: string }> =>
     ipcRenderer.invoke("audio:recording-complete", audioData),

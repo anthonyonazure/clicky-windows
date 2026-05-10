@@ -492,6 +492,63 @@
       backdrop-filter: blur(40px);
     }
 
+    /* Attachment chip — shown above input when an image is pasted/dropped */
+    #attachment-chip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 16px;
+      padding: 6px 10px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+    #attachment-chip[hidden] { display: none; }
+    #attachment-chip img {
+      width: 32px;
+      height: 32px;
+      object-fit: cover;
+      border-radius: 4px;
+      background: var(--bg-tertiary);
+      flex-shrink: 0;
+    }
+    #attachment-chip .att-label {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #attachment-chip .att-remove {
+      background: transparent;
+      border: none;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0 4px;
+      line-height: 1;
+    }
+    #attachment-chip .att-remove:hover { color: var(--text-primary); }
+
+    /* Full-window drop hint shown while dragging an image over the chat */
+    #drop-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(99, 140, 255, 0.12);
+      border: 2px dashed var(--accent);
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      pointer-events: none;
+    }
+    #drop-overlay[hidden] { display: none; }
+
     #input {
       flex: 1;
       padding: 10px 16px;
@@ -985,6 +1042,16 @@
     <span id="status-text"></span>
   </div>
 
+  <!-- Attachment chip (shown when an image has been pasted/dropped) -->
+  <div id="attachment-chip" hidden>
+    <img id="attachment-thumb" alt="">
+    <span class="att-label" id="attachment-label">image</span>
+    <button class="att-remove" id="attachment-remove" type="button" aria-label="Remove attached image">×</button>
+  </div>
+
+  <!-- Full-window drop hint -->
+  <div id="drop-overlay" hidden>Drop image to ask Clicky about it</div>
+
   <!-- Input -->
   <div id="input-area">
     <button id="tts-toggle" class="tts-btn" title="Voice: Off">
@@ -1293,19 +1360,112 @@
       return div;
     }
 
+    // ── Attached-image state ─────────────────────────────────────
+    // When an image is pasted or dropped, we stash it here until the
+    // next send. The backend treats it as a substitute for the screen
+    // capture, so POINT/ELEMENT tags get suppressed for that query.
+    let pendingAttachment = null; // { base64, mime }
+    const attachmentChip = document.getElementById('attachment-chip');
+    const attachmentThumb = document.getElementById('attachment-thumb');
+    const attachmentLabel = document.getElementById('attachment-label');
+    const attachmentRemove = document.getElementById('attachment-remove');
+
+    function setAttachment(base64, mime, label) {
+      pendingAttachment = { base64, mime };
+      attachmentThumb.src = `data:${mime};base64,${base64}`;
+      attachmentLabel.textContent = label || `image (${(mime || 'image/png').split('/')[1]})`;
+      attachmentChip.hidden = false;
+      input.placeholder = 'Ask about this image...';
+    }
+    function clearAttachment() {
+      pendingAttachment = null;
+      attachmentThumb.src = '';
+      attachmentChip.hidden = true;
+      input.placeholder = 'Ask about your screen...';
+    }
+    attachmentRemove.addEventListener('click', clearAttachment);
+
+    function readFileAsAttachment(file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result || '');
+        const comma = dataUrl.indexOf(',');
+        if (comma < 0) return;
+        const base64 = dataUrl.slice(comma + 1);
+        setAttachment(base64, file.type || 'image/png', file.name || 'pasted image');
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // Ctrl+V / Cmd+V on the input (or anywhere in the chat window) with
+    // an image on the clipboard attaches it. Text pastes pass through to
+    // the input normally.
+    document.addEventListener('paste', (e) => {
+      const items = e.clipboardData ? Array.from(e.clipboardData.items) : [];
+      for (const item of items) {
+        if (item.type && item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (!file) continue;
+          e.preventDefault();
+          readFileAsAttachment(file);
+          return;
+        }
+      }
+    });
+
+    // Drag-and-drop of an image file. dragenter/dragleave bookkeeping is
+    // needed because each child element fires its own events; we count
+    // enters to know when the cursor has truly left the window.
+    const dropOverlay = document.getElementById('drop-overlay');
+    let dragCounter = 0;
+    function hasFile(e) {
+      return e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+    }
+    window.addEventListener('dragenter', (e) => {
+      if (!hasFile(e)) return;
+      dragCounter++;
+      dropOverlay.hidden = false;
+    });
+    window.addEventListener('dragleave', () => {
+      dragCounter = Math.max(0, dragCounter - 1);
+      if (dragCounter === 0) dropOverlay.hidden = true;
+    });
+    window.addEventListener('dragover', (e) => {
+      if (hasFile(e)) e.preventDefault();
+    });
+    window.addEventListener('drop', (e) => {
+      if (!hasFile(e)) return;
+      e.preventDefault();
+      dragCounter = 0;
+      dropOverlay.hidden = true;
+      const file = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (file && file.type && file.type.startsWith('image/')) {
+        readFileAsAttachment(file);
+      }
+    });
+
     async function send() {
       const text = input.value.trim();
       if (!text) return;
 
       input.value = '';
+      const attachment = pendingAttachment;
 
       addMessage(text, 'user');
       addLoading();
+      // Clear visually before the network round-trip so the chip doesn't
+      // linger and confuse the user into thinking it might apply twice.
+      clearAttachment();
 
       try {
-        const response = await window.clicky.sendQuery(text);
+        const response = attachment
+          ? await window.clicky.sendQueryWithImage(text, attachment.base64)
+          : await window.clicky.sendQuery(text);
         document.getElementById('loading-msg')?.remove();
-        const displayText = response.replace(/\[POINT:[^\]]+\]/g, '').trim();
+        const displayText = response
+          .replace(/\[POINT:[^\]]+\]/g, '')
+          .replace(/\[ELEMENT:\d+\]/g, '')
+          .trim();
         addMessage(displayText || '(no response)', 'assistant');
       } catch (err) {
         document.getElementById('loading-msg')?.remove();

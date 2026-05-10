@@ -191,6 +191,21 @@ function setupIPC(): void {
     }
   });
 
+  // Chat query with an attached image (paste or drop). Skips screen
+  // capture and overlay routing — the answer is text only.
+  ipcMain.handle(
+    "chat:queryWithImage",
+    async (_event, text: string, imageBase64: string) => {
+      try {
+        const response = await companion.processQuery(text, { data: imageBase64 });
+        return response;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(msg);
+      }
+    }
+  );
+
   // Settings — getAll returns redacted (sensitive keys masked); revealKey
   // returns plaintext for one sensitive key for edit-time UI flows.
   ipcMain.handle("settings:getAll", () => settings.getRedacted());
