@@ -190,6 +190,42 @@
     }
 
     button.save:active { transform: scale(0.98); }
+
+    .key-hint {
+      margin-top: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--text-tertiary);
+    }
+
+    .key-hint code {
+      font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+      font-size: 11px;
+      color: var(--text-secondary);
+      background: var(--bg-secondary);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .key-hint button {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .key-hint button:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
   </style>
 </head>
 <body>
@@ -197,29 +233,49 @@
 
   <div class="section-label">API Keys</div>
 
-  <div class="field">
+  <div class="field key-field" data-key="anthropicApiKey">
     <label>Anthropic API Key</label>
     <input type="password" id="anthropicApiKey" placeholder="sk-ant-...">
+    <div class="key-hint" hidden>
+      <span>Stored: <code class="key-mask"></code></span>
+      <button type="button" class="key-show-btn">Show</button>
+    </div>
   </div>
 
-  <div class="field">
+  <div class="field key-field" data-key="openaiApiKey">
     <label>OpenAI API Key</label>
     <input type="password" id="openaiApiKey" placeholder="sk-... (Whisper transcription + TTS)">
+    <div class="key-hint" hidden>
+      <span>Stored: <code class="key-mask"></code></span>
+      <button type="button" class="key-show-btn">Show</button>
+    </div>
   </div>
 
-  <div class="field">
+  <div class="field key-field" data-key="openrouterApiKey">
     <label>OpenRouter API Key</label>
     <input type="password" id="openrouterApiKey" placeholder="sk-or-... (300+ models)">
+    <div class="key-hint" hidden>
+      <span>Stored: <code class="key-mask"></code></span>
+      <button type="button" class="key-show-btn">Show</button>
+    </div>
   </div>
 
-  <div class="field">
+  <div class="field key-field" data-key="assemblyaiApiKey">
     <label>AssemblyAI API Key</label>
     <input type="password" id="assemblyaiApiKey" placeholder="Voice transcription">
+    <div class="key-hint" hidden>
+      <span>Stored: <code class="key-mask"></code></span>
+      <button type="button" class="key-show-btn">Show</button>
+    </div>
   </div>
 
-  <div class="field">
+  <div class="field key-field" data-key="elevenlabsApiKey">
     <label>ElevenLabs API Key</label>
     <input type="password" id="elevenlabsApiKey" placeholder="Text-to-speech">
+    <div class="key-hint" hidden>
+      <span>Stored: <code class="key-mask"></code></span>
+      <button type="button" class="key-show-btn">Show</button>
+    </div>
   </div>
 
   <div class="section-label">Proxy</div>
@@ -344,6 +400,11 @@
   <button class="save" id="save">Save Settings</button>
 
   <script>
+    const SENSITIVE = new Set([
+      'anthropicApiKey', 'openaiApiKey', 'openrouterApiKey',
+      'assemblyaiApiKey', 'elevenlabsApiKey'
+    ]);
+
     const fields = [
       'anthropicApiKey', 'openaiApiKey', 'openrouterApiKey', 'assemblyaiApiKey', 'elevenlabsApiKey',
       'proxyUrl', 'useProxy', 'pushToTalkHotkey', 'transcriptionProvider',
@@ -351,12 +412,26 @@
       'alwaysOnTop', 'cursorBuddyEnabled', 'hipaaMode'
     ];
 
+    // Latest mask returned by the main process (e.g. "••••4f2a") — used to
+    // restore the "stored" hint after Hide and to detect whether the user
+    // actually entered a new value vs left the field untouched.
+    const storedMasks = {};
+
     window.clicky.getSettings().then((settings) => {
       fields.forEach((key) => {
         const el = document.getElementById(key);
         if (!el) return;
-        if (el.type === 'checkbox') el.checked = !!settings[key];
-        else el.value = settings[key] || '';
+        if (el.type === 'checkbox') {
+          el.checked = !!settings[key];
+        } else if (SENSITIVE.has(key)) {
+          // Sensitive keys: leave input empty, populate the "Stored" hint.
+          el.value = '';
+          const mask = settings[key] || '';
+          storedMasks[key] = mask;
+          updateKeyHint(key, mask);
+        } else {
+          el.value = settings[key] || '';
+        }
       });
 
       // Load defaultVoice from ttsEnabled + ttsProvider
@@ -369,6 +444,54 @@
 
       updateProviderUI();
       updateStatus(settings);
+    });
+
+    function updateKeyHint(key, mask) {
+      const wrapper = document.querySelector(`.key-field[data-key="${key}"]`);
+      if (!wrapper) return;
+      const hint = wrapper.querySelector('.key-hint');
+      const maskEl = wrapper.querySelector('.key-mask');
+      if (!hint || !maskEl) return;
+      if (mask) {
+        maskEl.textContent = mask;
+        hint.hidden = false;
+      } else {
+        maskEl.textContent = '';
+        hint.hidden = true;
+      }
+    }
+
+    // Wire up Show / Hide buttons. Show fetches the plaintext from main and
+    // drops it into the input for editing; Hide clears the input and brings
+    // the masked hint back.
+    document.querySelectorAll('.key-field').forEach((wrapper) => {
+      const key = wrapper.dataset.key;
+      const input = wrapper.querySelector('input');
+      const btn = wrapper.querySelector('.key-show-btn');
+      const hint = wrapper.querySelector('.key-hint');
+      if (!key || !input || !btn || !hint) return;
+
+      btn.addEventListener('click', async () => {
+        if (btn.dataset.state === 'shown') {
+          input.value = '';
+          input.type = 'password';
+          btn.textContent = 'Show';
+          btn.dataset.state = '';
+          hint.hidden = !storedMasks[key];
+          return;
+        }
+        try {
+          const plain = await window.clicky.revealKey(key);
+          if (!plain) return;
+          input.value = plain;
+          input.type = 'text';
+          btn.textContent = 'Hide';
+          btn.dataset.state = 'shown';
+          hint.hidden = true;
+        } catch (err) {
+          console.error('revealKey failed:', err);
+        }
+      });
     });
 
     function updateProviderUI() {
@@ -393,8 +516,25 @@
       fields.forEach((key) => {
         const el = document.getElementById(key);
         if (!el) return;
-        values[key] = el.type === 'checkbox' ? el.checked : el.value;
-        window.clicky.setSetting(key, values[key]);
+        if (el.type === 'checkbox') {
+          values[key] = el.checked;
+          window.clicky.setSetting(key, values[key]);
+        } else if (SENSITIVE.has(key)) {
+          // Only persist a sensitive key when the input has a fresh value.
+          // Empty input = leave existing key alone. Mask string = ignore.
+          const v = (el.value || '').trim();
+          if (v && !v.startsWith('••••')) {
+            window.clicky.setSetting(key, v);
+            // Mark the key as freshly stored so isConfigured-style checks pass.
+            values[key] = v;
+          } else {
+            // For status checks below, surface that a key is still configured.
+            values[key] = storedMasks[key] || '';
+          }
+        } else {
+          values[key] = el.value;
+          window.clicky.setSetting(key, values[key]);
+        }
       });
 
       // Save defaultVoice as ttsEnabled + ttsProvider

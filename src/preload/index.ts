@@ -57,6 +57,10 @@ contextBridge.exposeInMainWorld("clicky", {
   getSettings: () => ipcRenderer.invoke("settings:getAll"),
   setSetting: (key: string, value: unknown) =>
     ipcRenderer.invoke("settings:set", key, value),
+  // Reveal the plaintext for one sensitive setting (API keys). Used by the
+  // settings UI when the user clicks "Show" on a stored key.
+  revealKey: (key: string): Promise<string> =>
+    ipcRenderer.invoke("settings:revealKey", key),
 
   // Chat — send a text query (captures screen + sends to Claude)
   sendQuery: (text: string): Promise<string> =>

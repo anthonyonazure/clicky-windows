@@ -222,6 +222,45 @@
       box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.1);
     }
 
+    .key-group .key-hint {
+      margin-top: 5px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 10px;
+      color: var(--text-tertiary);
+      text-transform: none;
+      letter-spacing: normal;
+      font-weight: normal;
+    }
+
+    .key-group .key-hint code {
+      font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+      font-size: 10px;
+      color: var(--text-secondary);
+      background: var(--bg-secondary);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+
+    .key-group .key-hint button {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      padding: 2px 7px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .key-group .key-hint button:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
     .setup-footer {
       display: flex;
       align-items: center;
@@ -856,29 +895,49 @@
       </select>
     </div>
 
-    <div class="key-group">
+    <div class="key-group" data-key="anthropicApiKey">
       <label>Anthropic Key <span class="badge" id="badge-anthropic">required</span></label>
       <input type="password" id="key-anthropic" placeholder="sk-ant-api03-...">
+      <div class="key-hint" hidden>
+        <span>Stored: <code class="key-mask"></code></span>
+        <button type="button" class="key-show-btn">Show</button>
+      </div>
     </div>
 
-    <div class="key-group">
+    <div class="key-group" data-key="openaiApiKey">
       <label>OpenAI Key <span class="badge" id="badge-openai">optional</span></label>
       <input type="password" id="key-openai" placeholder="sk-... (GPT, voice, TTS)">
+      <div class="key-hint" hidden>
+        <span>Stored: <code class="key-mask"></code></span>
+        <button type="button" class="key-show-btn">Show</button>
+      </div>
     </div>
 
-    <div class="key-group">
+    <div class="key-group" data-key="openrouterApiKey">
       <label>OpenRouter Key <span class="badge" id="badge-openrouter">optional</span></label>
       <input type="password" id="key-openrouter" placeholder="sk-or-... (300+ models)">
+      <div class="key-hint" hidden>
+        <span>Stored: <code class="key-mask"></code></span>
+        <button type="button" class="key-show-btn">Show</button>
+      </div>
     </div>
 
-    <div class="key-group">
+    <div class="key-group" data-key="assemblyaiApiKey">
       <label>AssemblyAI <span class="badge optional">optional</span></label>
       <input type="password" id="key-assemblyai" placeholder="Voice transcription key">
+      <div class="key-hint" hidden>
+        <span>Stored: <code class="key-mask"></code></span>
+        <button type="button" class="key-show-btn">Show</button>
+      </div>
     </div>
 
-    <div class="key-group">
+    <div class="key-group" data-key="elevenlabsApiKey">
       <label>ElevenLabs <span class="badge optional">optional</span></label>
       <input type="password" id="key-elevenlabs" placeholder="Text-to-speech key">
+      <div class="key-hint" hidden>
+        <span>Stored: <code class="key-mask"></code></span>
+        <button type="button" class="key-show-btn">Show</button>
+      </div>
     </div>
 
     <div class="setup-footer">
@@ -1020,15 +1079,35 @@
     let isConfigured = false;
     let firstMessage = true;
 
+    // Latest mask returned by main for each sensitive key (e.g. "••••4f2a").
+    const storedMasks = {};
+
+    function applyKeyMask(dataKey, mask) {
+      const wrapper = document.querySelector(`.key-group[data-key="${dataKey}"]`);
+      if (!wrapper) return;
+      const hint = wrapper.querySelector('.key-hint');
+      const maskEl = wrapper.querySelector('.key-mask');
+      if (!hint || !maskEl) return;
+      if (mask) {
+        maskEl.textContent = mask;
+        hint.hidden = false;
+        storedMasks[dataKey] = mask;
+      } else {
+        maskEl.textContent = '';
+        hint.hidden = true;
+        storedMasks[dataKey] = '';
+      }
+    }
+
     // Load existing settings
     window.clicky.getSettings().then((settings) => {
-      console.log('Settings loaded:', JSON.stringify(settings));
-
-      if (settings.anthropicApiKey) keyAnthropicInput.value = settings.anthropicApiKey;
-      if (settings.openaiApiKey) keyOpenaiInput.value = settings.openaiApiKey;
-      if (settings.openrouterApiKey) keyOpenrouterInput.value = settings.openrouterApiKey;
-      if (settings.assemblyaiApiKey) keyAssemblyaiInput.value = settings.assemblyaiApiKey;
-      if (settings.elevenlabsApiKey) keyElevenlabsInput.value = settings.elevenlabsApiKey;
+      // Inputs stay empty; the "Stored: ••••<last4>" hint shows what's
+      // already saved without exposing the plaintext to the renderer.
+      applyKeyMask('anthropicApiKey', settings.anthropicApiKey || '');
+      applyKeyMask('openaiApiKey', settings.openaiApiKey || '');
+      applyKeyMask('openrouterApiKey', settings.openrouterApiKey || '');
+      applyKeyMask('assemblyaiApiKey', settings.assemblyaiApiKey || '');
+      applyKeyMask('elevenlabsApiKey', settings.elevenlabsApiKey || '');
 
       // Set provider + model
       setupProvider.value = settings.aiProvider || 'anthropic';
@@ -1056,6 +1135,37 @@
     // Toggle setup panel
     toggleSetupBtn.addEventListener('click', () => {
       setup.classList.toggle('hidden');
+    });
+
+    // Wire Show/Hide buttons on each stored-key hint.
+    document.querySelectorAll('.key-group[data-key]').forEach((wrapper) => {
+      const dataKey = wrapper.dataset.key;
+      const inputEl = wrapper.querySelector('input');
+      const btn = wrapper.querySelector('.key-show-btn');
+      const hint = wrapper.querySelector('.key-hint');
+      if (!dataKey || !inputEl || !btn || !hint) return;
+
+      btn.addEventListener('click', async () => {
+        if (btn.dataset.state === 'shown') {
+          inputEl.value = '';
+          inputEl.type = 'password';
+          btn.textContent = 'Show';
+          btn.dataset.state = '';
+          hint.hidden = !storedMasks[dataKey];
+          return;
+        }
+        try {
+          const plain = await window.clicky.revealKey(dataKey);
+          if (!plain) return;
+          inputEl.value = plain;
+          inputEl.type = 'text';
+          btn.textContent = 'Hide';
+          btn.dataset.state = 'shown';
+          hint.hidden = true;
+        } catch (err) {
+          console.error('revealKey failed:', err);
+        }
+      });
     });
 
     function setConfigured(configured) {
@@ -1089,16 +1199,29 @@
         window.clicky.setSetting('claudeModel', setupModel.value);
       }
 
-      // Validate required key
-      const anthropicKey = keyAnthropicInput.value.trim();
-      const openaiKey = keyOpenaiInput.value.trim();
-      const openrouterKey = keyOpenrouterInput.value.trim();
-      const keyMap = { anthropic: anthropicKey, openai: openaiKey, openrouter: openrouterKey };
+      // Treat a mask string as "no input typed" — it means the user opened
+      // the panel but didn't change the stored key. Real keys never start
+      // with "••••".
+      const cleanInput = (el) => {
+        const v = (el.value || '').trim();
+        return v.startsWith('••••') ? '' : v;
+      };
+
+      const anthropicKey = cleanInput(keyAnthropicInput);
+      const openaiKey = cleanInput(keyOpenaiInput);
+      const openrouterKey = cleanInput(keyOpenrouterInput);
+
+      // The required key for the chosen provider is "present" if the user
+      // typed a new value OR there's already one stored on disk.
+      const presentMap = {
+        anthropic: anthropicKey || storedMasks.anthropicApiKey,
+        openai: openaiKey || storedMasks.openaiApiKey,
+        openrouter: openrouterKey || storedMasks.openrouterApiKey,
+      };
       const inputMap = { anthropic: keyAnthropicInput, openai: keyOpenaiInput, openrouter: keyOpenrouterInput };
-      const requiredKey = keyMap[provider];
       const requiredInput = inputMap[provider];
 
-      if (!requiredKey) {
+      if (!presentMap[provider]) {
         requiredInput.classList.add('error');
         requiredInput.addEventListener('input', () => requiredInput.classList.remove('error'), { once: true });
         return;
@@ -1110,21 +1233,21 @@
       if (openaiKey) {
         window.clicky.setSetting('openaiApiKey', openaiKey);
         // Auto-set OpenAI as transcription + TTS provider if no other keys
-        if (!keyAssemblyaiInput.value.trim()) {
+        if (!cleanInput(keyAssemblyaiInput) && !storedMasks.assemblyaiApiKey) {
           window.clicky.setSetting('transcriptionProvider', 'openai');
         }
-        if (!keyElevenlabsInput.value.trim()) {
+        if (!cleanInput(keyElevenlabsInput) && !storedMasks.elevenlabsApiKey) {
           window.clicky.setSetting('ttsProvider', 'openai');
         }
       }
 
-      const assemblyaiKey = keyAssemblyaiInput.value.trim();
+      const assemblyaiKey = cleanInput(keyAssemblyaiInput);
       if (assemblyaiKey) {
         window.clicky.setSetting('assemblyaiApiKey', assemblyaiKey);
         window.clicky.setSetting('transcriptionProvider', 'assemblyai');
       }
 
-      const elevenlabsKey = keyElevenlabsInput.value.trim();
+      const elevenlabsKey = cleanInput(keyElevenlabsInput);
       if (elevenlabsKey) {
         window.clicky.setSetting('elevenlabsApiKey', elevenlabsKey);
         window.clicky.setSetting('ttsProvider', 'elevenlabs');

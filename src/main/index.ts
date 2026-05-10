@@ -191,8 +191,12 @@ function setupIPC(): void {
     }
   });
 
-  // Settings
-  ipcMain.handle("settings:getAll", () => settings.getAll());
+  // Settings — getAll returns redacted (sensitive keys masked); revealKey
+  // returns plaintext for one sensitive key for edit-time UI flows.
+  ipcMain.handle("settings:getAll", () => settings.getRedacted());
+  ipcMain.handle("settings:revealKey", (_event, key: string) =>
+    settings.revealKey(key)
+  );
   ipcMain.handle("settings:set", (_event, key: string, value: unknown) => {
     settings.set(key as keyof ReturnType<typeof settings.getAll>, value as never);
 
@@ -228,6 +232,10 @@ function setupIPC(): void {
 app.whenReady().then(() => {
   // Hide from taskbar — tray only
   app.dock?.hide?.();
+
+  // safeStorage is only usable after ready — encrypt any legacy plaintext
+  // API keys on disk now.
+  settings.migrateIfNeeded();
 
   overlayWindows = createOverlayWindows();
   companion = new CompanionManager(settings, overlayWindows);
